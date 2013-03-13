@@ -38,54 +38,36 @@ parse_ff_dump()->
 		    	{ok,<<"OK">>} = eredis:q(C,["SET",Q,P])
 		end     		    		    
 		end, L).
+
+
+%zcount "2013-2-20" -inf +inf
 		
 parse_to_list()->
-    FileName = "/Users/ginahagg/mywork/redistest.txt",
-    Res = eredis:start_link(),
-    {ok, C} = Res,
+    FileName = "/Users/ginahagg/mywork/hasbeenhere/firefoxhistory1.txt",
 	%%{ok, [Form]} = epp:parse_file(FileName,[],[]),
     {ok, Data} = file:read_file(FileName),
 	L = binary:split(Data,<<"\n">>,[global]),
-	LL = lists:map(fun(X)-> 
+	Res = eredis:start_link(),
+    {ok, C} = Res,
+	lists:map(fun(X)-> 
 	    K = binary:split(X,<<"|">>,[global]),
 	    %io:format("Heres ~p\n",[K]),
-	    Sset = case K of
+	    case K of
 			[<<>>] -> io:format("empty");
 		    [P] -> P;
 		    [_, P, Q] ->	
 		    	%io:format("~p\n",[Q])
-		    	eredis:q(C,["ZADD", "ILIST",Q, P])		    	
+		    	QQ = list_to_integer(binary_to_list(Q)),
+		    	{{Yr,Mn,Dy},_} = parse_msec_date(QQ),
+		    	ZsetName = lists:concat([Yr,"-",Mn,"-",Dy]),
+		    	io:format("adding ~p to ~p\n",[Q,ZsetName]),
+		    	eredis:q(C,["ZADD", ZsetName,Q, P])		    	
 		end     		    		    
 		end, L).
 		
 		
 		
-%LLL = lists:flatten(LL),
-%io:format("list:~p",[LLL]).
-%{ok,<<"OK">>} = eredis:q(C,["MSET"| LLL]).
-
-%redis.zrangebyscore('GOOG', (time.now.utc - 5).to_i, time.now.utc.to_i)
-%redis.zrangebyscore('ILIST', "1340482096526383", "1361334628281280")
-
-%eredis:q(C,["KEYS","134*"]).
-%{ok,[<<"1340482096526383">>,<<"1340176541701821">>,
-%     <<"1345506891212191">>]}
-
-
-
-%105> Dt = {{2013,3,10},{0,0,0}}.
-%{{2013,3,10},{0,0,0}}
-%106> GSecs = calendar:datetime_to_gregorian_seconds({{1970,1,1},{0,0,0}}).
-%62167219200
-%107> Secs = calendar:datetime_to_gregorian_seconds(Dt)-GSecs.             
-%1362873600
-%108> {Secs div 1000000, Secs rem 1000000,0}.
-%{1362,873600,0}
-
-
-%KVP = ["key1","value1","key2","value2"].
-%["key1","value1","key2","value2"]
-%122> eredis:q(Cdd,["MSET"| KVP]).                       
+                      
 %{ok,<<"OK">>}
 
 
@@ -120,8 +102,36 @@ day_visits(Srcword, Dtt)->
 			_ -> R2
 		end
 	end, R).
-	    
-%zrangebyscore ILIST  "1340482096526383"  "1361334628281280" withscores
+	
+find_srch_key(Dtt) ->
+	case Dtt of 
+        {A,0,0} ->
+        	lists:concat([A,"-","*"]);
+    	{A,B,0} ->    	   
+        	lists:concat([A,"-",B,"-","*"]);
+    	{A,B,C} ->
+        	lists:concat([A,"-",B,"-",C])
+    end.
+    
+getvisits(Srcword, Dtt)->   
+    Keyz = find_srch_key(Dtt),
+    %io:format("Keyz:~p",[Keyz]),
+	{ok,Con} = eredis:start_link(),
+	{ok,R} = eredis:q(Con,["KEYS", Keyz]),
+	lists:map(fun(X)-> 
+		Keyy = binary_to_list(X),
+		%{ok, Ct} =  eredis:q(Con,["ZCOUNT", Keyy, "-inf" , "+inf"]), 	
+		{ok, R1} =  eredis:q(Con,["ZRANGE", Keyy, "0" , "-1"]),          %,"WITHSCORES"]),
+		%io:format("~p:::~p\n",[Keyy,R1]),
+		FL = lists:map(fun(X) ->			
+			has_visited(X,Srcword)
+		end,R1)
+		%,lists:flatten(FL)
+	end,R).
+	
+
+
+
 
 dayvisits(Srcword, Dtt)->
     
@@ -155,13 +165,23 @@ dayvisits(Srcword, Dtt)->
 		I = string:str(R2,Srcword),
 		case I of 
 			0 ->
-				io:format("No visits",[]);
+				[];
 			_ -> R2
 		end
 	end, R).
 
+has_visited(Keyy,Srcword) ->
+	    %io:format("Keyy::~p\n",[Keyy]),
+	    Keyyy = binary_to_list(Keyy),		
+		
+		I = string:str(Keyyy,Srcword),
+		if I > 0 -> Keyyy;
+		true -> ""
+		end.
+		
 		
 parse_msec_date(Dte)->
+    io:format("msecs: ~p",[Dte]),
 	MSz = Dte div ?MSecZ,
 	Sz = Dte rem ?MSecZ,
 	Sz1 = Sz div ?MIL,
@@ -170,4 +190,38 @@ parse_msec_date(Dte)->
 	{Dt, Tm}.
 	
 	
+	
+	
+%% Useful info
+
+%LLL = lists:flatten(LL),
+%io:format("list:~p",[LLL]).
+%{ok,<<"OK">>} = eredis:q(C,["MSET"| LLL]).
+
+%redis.zrangebyscore('GOOG', (time.now.utc - 5).to_i, time.now.utc.to_i)
+%redis.zrangebyscore('ILIST', "1340482096526383", "1361334628281280")
+
+%eredis:q(C,["KEYS","134*"]).
+%{ok,[<<"1340482096526383">>,<<"1340176541701821">>,
+%     <<"1345506891212191">>]}
+
+
+
+%105> Dt = {{2013,3,10},{0,0,0}}.
+%{{2013,3,10},{0,0,0}}
+%106> GSecs = calendar:datetime_to_gregorian_seconds({{1970,1,1},{0,0,0}}).
+%62167219200
+%107> Secs = calendar:datetime_to_gregorian_seconds(Dt)-GSecs.             
+%1362873600
+%108> {Secs div 1000000, Secs rem 1000000,0}.
+%{1362,873600,0}
+
+
+%KVP = ["key1","value1","key2","value2"].
+%["key1","value1","key2","value2"]
+%122> eredis:q(Cdd,["MSET"| KVP]). 	
+
+	    
+%zrangebyscore ILIST  "1340482096526383"  "1361334628281280" withscores
+%zcount "2013-2-20" -inf +inf
 	
